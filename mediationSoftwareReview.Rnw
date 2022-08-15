@@ -1,0 +1,391 @@
+\documentclass[11pt]{article}
+\usepackage{geometry}                % See geometry.pdf to learn the layout options. There are lots.
+\geometry{letterpaper}                   % ... or a4paper or a5paper or ...
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{epstopdf}
+\usepackage{natbib}
+\usepackage{bm}
+\usepackage{tikz}
+\usepackage{float}
+\newcommand\independent{\protect\mathpalette{\protect\independenT}{\perp}}
+\def\independenT#1#2{\mathrel{\rlap{$#1#2$}\mkern2mu{#1#2}}}
+
+\DeclareGraphicsRule{.tif}{png}{.png}{`convert #1 `dirname #1`/`basename #1 .tif`.png}
+
+\title{Review: \texttt{mediation} Package in \texttt{R}}
+\author{Adam Sales}
+%\SweaveOpts{concordance=TRUE}
+%\date{}                                           % Activate to display a given date or no date
+
+\newcommand{\medmod}{f_{M|Z}}
+\newcommand{\outmod}{f_{Y|M,Z}}
+\newcommand{\E}{\mathbb{E}}
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+
+\maketitle
+%\section{}
+%\subsection{}
+
+
+\section{Introduction}
+The primary role of statistical causal inference in policy studies is to estimate the effects of interventions, treatments, and general causes.
+But estimating cause and effect does not satisfy the scientific mind, and should not satisfy policy studies either.
+For both scientific and practical reasons, we need to know how a treatment caused its effect.
+This is the realm of statistical mediation analysis.
+
+The past decade has seen an explosion into research in methods for statistical mediation analysis based on solid conceptual and statistical footing.
+In particular, methodologists such as \citet[e.g.][]{vanderweele2008simple,vanderweele2014unification,vanderweele2015explanation}, \citet{hong2010ratio,hong2015causality}, and a group of scholars including \citet*[][e.g.]{imai2010causal} have adapted the Neyman-Rubin Causal Model \citep{rubin1978bayesian} to studies of mediation, and the result has included  advances in conceptual clarity, a suite of new statistical methods, and a better understanding of what causal mediation analysis can and cannot do.
+The latter group has written \texttt{mediation}, a software package for the \texttt{R} statistical environment \citep{rcite} that executes the many of the new methods they have developed.
+
+In this article I will summarize some of the recent advances in mediation analysis, and review the \texttt{mediation} package.
+I will demonstrate, by example, some of its capabilities and discuss some of its limitations, with an eye towards applications in educational sciences.
+A more complete discussion of causal mediation analysis can be found in \citet{vanderweele2015explanation} or \citet{imai2011unpacking}.
+The \texttt{mediation} package is thoroughly described in \citet{imai2010causal} and \citet{tingley2014mediation}.
+
+The structure of the paper is as follows: the following section defines the causal mediation effects; Section \ref{sec:estimation} demonstrates how the \texttt{mediation} package estimates these effects; Section \ref{sec:sensitivity} discusses the assumptions under which causal mediation effects are identifiable from the data, and demonstrates a method for assessing a mediation model's sensitivity to departures from them; Section \ref{sec:moderated} discusses ``moderated mediation,'' and Section \ref{sec:discussion} concludes with a discussion.
+
+
+\subsection{Example Data Analysis}
+
+To demonstrate the functionality of the \texttt{mediation} package, we will analyze a toy dataset with a binary treatment variable, a binary mediator, and an continuous outcome.
+The conceptual model behind the data is illustrated in Figure \ref{fig:graph}; we may think of the dataset as emerging from a study of a program meant to encourage high school students to take an Advanced Placement (AP) course.
+The treatment, $Z$, represents students' assignment to the program, and the outcome $Y$ is the logarithm of their wages, say, 10 years after participation.
+The causal association between $Z$ and $Y$ is hypothetically mediated by college attendance, a binary variable; that is, it may be the case that taking AP classes encourages or helps students attend college.
+One of the advantages of the potential-outcomes characterization of mediation analysis, as implemented in the \texttt{mediation} software package, is the natural way in which it handles mediators that are not normally distributed, such as binary, ordinal, or count variables.
+The toy data also contains one pre-treatment covariate, \texttt{ses}, which is meant to represent a measure of students' socioeconomic status (SES).
+
+
+
+\begin{figure}
+\centering
+\begin{tikzpicture}[scale=1,transform shape]
+
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (z) at (6,0) {\texttt{AP}};
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (y) at +(9,0){\texttt{income}};
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (m) at (7.5,2){\texttt{college}};
+	\draw[->,line width=2pt](z)--(m);
+	\draw[->,line width=2pt](m)--(y);
+	\draw[->,line width=2pt](z)--(y);
+	\node at (6.4,1.2) {(1)};
+	\node at (8.6,1.2) {(2)};
+	\node at (7.5,.3) {(3)};
+
+\end{tikzpicture}
+\caption{A schematic representation of mediation analysis, in which the treatment variable $Z$, in this case the variable \texttt{AP}, affects the outcome $Y$, in this case the variable \texttt{logInc}, via a mediator \texttt{college} and directly.}
+\label{fig:graph}
+\end{figure}
+
+\section{The Goals of Mediation Analysis: Defining Direct and Indirect Effects}\label{sec:def}
+  Let $Z$ denote a treatment of interest, and let $Y$ denote an outcome.
+In a traditional causal inference study, each subject has a set of ``potential outcomes'': $Y(Z=z)$, for each $z$ in the support of $Z$ \citep{splawa1990application,rubin:1975,holland:1986a}.
+These record the outcome that a subject \emph{would} present were she assigned to treatment $z$.
+Notably, $Y(Z=z)$ is well-defined for all subjects in the study, but only observed for subjects whose treatment assignment was $z$.
+
+In our AP program example, $Z$ equals one for students who participated and zero for others; so every student, in the treatment or the control arm, has two potential outcomes of this sort, $Y(Z=1)$ and $Y(Z=0)$.
+However, $Y(Z=1)$ is only observed for subjects in the intervention group, and $Y(Z=0)$ is only observed for subjects in the control group.
+Then subject $i$'s observed value is $Y_i=Z_iY_i(Z=1)+(1-Z_i)Y_i(Z=0)$.
+Each subject $i$'s treatment effect is $Y_i(Z=1)-Y_i(Z=0)$; since we only observe one of $Y(Z=0)$ or $Y(Z=1)$, an individual's treatment effect is typically unidentified.
+However, aggregate treatment effects, such as the average treatment effect  (ATE) $\E [Y(Z=1)-Y(Z=0)]$ may be identified under certain conditions.
+Specifically, the ATE is identified when there is no interference between units---that is, a subject's potential outcomes are functions of his treatment status $Z_i$, and not the treatment status of other subjects---and no unobserved confounding---an unobserved variable that predicts both $Z$ and either $Y(Z=1)$, $Y(Z=0)$, or both, after conditioning on observed variables.
+
+In the presence of a mediator $M$, for instance, college attendance, the potential outcomes framework needs to be expanded.
+Specifically, since $M$ itself is a function of the treatment, $M$ also has potential values $M(Z=z)$.
+Furthermore, $Y$'s potential values may be written as a function of both $Z$ and $M$, as $Y(Z=z, M=m)$, or, more compactly, as $Y(z,m)$.
+In fact, $Y$'s potential values can reflect $M$'s dependence on $Z$.
+So $Y_i(Z=z, M=M(z))=Y(Z=z)$ is the outcome that subject $i$ would present if when assigned to treatment $Z=z$, and and encodes that process by including $M(z)$.
+Alternatively, $Y_i(Z=z, M=M(z'))$, for $z'\ne z$, is the outcome $i$ would present if he were assigned to treatment $z$, but his mediator value $M$ took the value it would take if he were assigned to treatment $z'$.
+For instance, in the AP example, $Y_i(Z=1, M=M(0))$ represents subject $i$'s log-income if $i$ participates in the AP encouragement program, but goes on to complete the amount of schooling he would have completed without the program.
+Alternatively, $Y_i(Z=0,M=M(1))$ is $i$'s log-income if $i$ does not participate in the program, but attains the education he would have completed if he had participated.
+These values are strictly counterfactual, in that they can never be observed---by definition, the mediator value that a subject in treatment arm $z$ experiences is $M(z)$---it can never be $M(z')$ (unless $M(z)=M(z')$).
+
+The \texttt{mediation} software package is designed to estimate averages of two types of mediational effects, often called
+``causal mediation effects'' and ``direct effects.''\footnote{Also called ``natural'' indirect and direct effects, respectively \citep{vanderweele2015explanation}.}
+For a binary treatment $Z$, the causal mediation effect, is either
+\begin{equation}\label{eq:delta0}
+\delta(0)=Y(Z=0,M=M(1))-Y(Z=0,M=M(0))
+\end{equation}
+or
+\begin{equation}\label{eq:delta1}
+\delta(1)=Y(Z=1,M=M(1))-Y(Z=1,M=M(0))
+\end{equation}
+in which we imagine that $Z$ is held fixed at either 0, as in $\delta(0)$ or 1, as in $\delta(1)$, but $M$ is allowed to vary from what it would be under treatment $M(1)$ to what it would be under control $M(0)$.
+For instance, in the AP example, $\delta(0)$ is what we would observe for an individual if she did not participate in the AP program, but (counter-factually) attained the education she would have if she had participated.
+That is, say the AP program effects her income in several different ways, including causing her to attend college---without participation, she would not have taken an AP course, which is what motivated her to attend college; so $M(1)=1$.
+Without participating in the AP program, she would not have been motivated to attend college, so $M(0)=0$.
+But say the program also, by causing her to take an AP class, increased her confidence and analytical abilities, which improve her income regardless of her educational attainment.
+$\delta(0)$ is the effect in her income of attending college, if she has the confidence and analytical ability she would have without the AP program.
+$\delta(1)$ is the effect in her income of attending college, if she has confidence and analytical ability she would have if she does participate the AP program.
+A difference between $\delta(0)$ and $\delta(1)$ is referred to as a "treatment mediator interaction" and captures the difference of the effect of $M$ in treatment or control conditions.
+
+Direct effects, on the other hand, capture the effect of the treatment that does not depend on $M$.
+Analogous to $\delta(0)$ and $\delta(1)$, there are two types:
+\begin{equation}\label{eq:zeta0}
+\zeta(0)=Y(Z=1,M=M(0))-Y(Z=0,M=M(0))
+\end{equation}
+or
+\begin{equation}\label{eq:zeta1}
+\zeta(1)=Y(Z=1,M=M(1))-Y(Z=0,M=M(1))
+\end{equation}
+These hold the mediator value fixed at what it would have been under control ($\zeta(0)$) or treatment ($\zeta(1)$).
+For instance, in the AP example, $\zeta(0)$ is difference in our example subject's log income if gains the confidence and analytical ability from the AP program versus if she does not, assuming she does not attend college.
+$\zeta(1)$ is the same difference, if she does.
+
+The mediation and direct effects add up to the total effect of the treatment:
+\begin{align*}
+&\zeta(1)+\delta(0)\\
+=&Y(Z=1,M=M(1))-Y(Z=0,M=M(1))+Y(Z=0,M=M(1))-Y(Z=0,M=M(0))\\
+=&Y(Z=1,M=M(1))-Y(Z=0,M=M(0))\\
+=&Y(Z=1)-Y(Z=0)
+\end{align*}
+with an analogous result for $\zeta(0)+\delta(1)$.
+Mediation analysis, then, decomposes the effect of the treatment $Z$ on the outcome $Y$ into a portion dependent on $M$ and one dependent on other mechanisms.
+
+Just as individual treatment effects $Y_i(1)-Y_i(0)$ are not typically identified, individual causal mediation effects and direct effects are not identified either.
+The \texttt{mediation} package, following most mediation analyses, focuses on estimating average causal mediation effects (ACME) and average direct effects (ADE), or $\E \delta$ and $\E \zeta$.
+We will discuss the assumptions under which ACME and ADE are identified in the context of sensitivity analysis, Section \ref{sec:sensitivity}.
+Briefly, in addition to no interference between units, mediation analysis requires no unmeasured confounding between the treatment and both the mediator and the outcome, and no unmeasured confounding between the mediator and the outcome.
+To satisfy these conditions, it helps to condition analysis on pre-treatment covariates $X$.
+
+\section{Estimating ACME and ADE in the \texttt{mediation} package}\label{sec:estimation}
+<<initialize,echo=FALSE, results=hide>>=
+
+### install the version of the mediation package that was current when this was written
+### into a temporary directory
+### code copied from https://stackoverflow.com/a/14896943
+path <- tempdir()
+firstpath <- .libPaths()[1]
+.libPaths(c(firstpath, path))
+install.packages("mediation_4.4.5.tar.gz", lib=path,repos=NULL,source=TRUE)
+
+library(mediation)
+library(MASS)
+@
+
+<<makeFakeData,echo=FALSE,results=hide>>=
+invLogit <- function(x) exp(x)/(1+exp(x))
+
+set.seed(1)
+n <- 1000
+ses <- rnorm(n)
+AP <- rep(0,n) ### AP encouragement program
+AP[sample(1:n,n/2,replace = FALSE,prob = invLogit(.3*ses))] <- 1
+
+SAT <- .5*AP+.5*ses+rnorm(n)
+
+college <- rbinom(n,1,prob = invLogit(.3*AP+.5*SAT+2*ses)) ## take AP?
+
+logIncome <- .3*AP+.3*ses+.5*college-0.2*college*AP +rnorm(n) #+ifelse(M1=='no diploma',0,
+
+APdata <- data.frame(ses,AP,college,logIncome)
+
+@
+
+Estimating average direct and indirect effects is a three step procedure \citep{imai2011unpacking}.
+The first step is to estimate a distribution for $M(z)$ for each each treatment $z$.
+The next step fits a model for $Y(Z,M)$, yieding a distribution for $Y$'s potential outcomes for each possible treatment $z$ and mediator value $m$.
+The next step plugs the estimates for $M(z)$ into a model for potential outcomes $Y(Z,M)$, and directly calculates each of the terms in (\ref{eq:delta0}), (\ref{eq:delta1}), (\ref{eq:zeta0}), and (\ref{eq:zeta1}).
+Therefore, two models are necessary: a model of the mediator as a function of the treatment, or $\medmod$, and a model of potential outcomes as a function of the treatment and the mediator, $\outmod$.
+In principle, any type of model that yields estimates of $M$ or $Y$ as a function of $Z$ or $Z$ and $M$, respectively, would be compatible with potential outcomes framework for mediation analysis.
+In practice, the \texttt{mediation} package offers a very wide range of options within \texttt{R}.
+A complete list of compatible models is available in \citet[][p. 5]{tingley2014mediation}; in brief, linear models, generalized linear models (GLMs), ordered probit models, generalized additive models (GAMs), quantile models or survival models, with one or two levels, are compatible for $\medmod$ or $\outmod$.
+Additionally, $\outmod$ may be modeled as tobit.
+
+Generally, the procedure is as follows: first, estimate $\medmod$ and $\outmod$ from the data, and then combine the fitted models with the $\texttt{mediate()}$ function.
+
+For the AP example, with college attendance \texttt{college} as a mediator, we can use binary probit, implemented with the \texttt{R} function \texttt{glm()} as $\medmod$, and ordinary least squares regression, implemented with \texttt{lm()}, as $\outmod$.
+<<simpleExample1, echo=TRUE, results=hide>>=
+medModel <- glm(college~AP+ses,family=binomial(probit),data=APdata)
+outModel <- lm(logIncome~AP*college+ses,data=APdata)
+@
+The models both contain a continuous pre-treatment covariate \texttt{ses}.
+Additionally, $\outmod$ allows \texttt{college} to interact with \texttt{AP}---a treatment-mediator interaction.
+
+To estimate ACME and ADE, we combine $\medmod$ and $\outmod$.
+The \texttt{mediate} function requires the user to specify the name of the treatment variable and of the mediator variable in its arguments.
+<<simpleExample2,echo=TRUE,results=hide>>=
+library(mediation)
+med <- mediate(model.m = medModel,model.y = outModel,treat = 'AP',
+    mediator = 'college',data=APdata)
+@
+Use the \texttt{summary()} function to display the results:
+<<summary1,echo=TRUE,results=verbatim>>=
+summary(med)
+@
+The model detected both natural direct and indirect effects.
+Since the outcome model we specified, $\outmod$, included an interaction between \texttt{AP} and \texttt{college}, the model looked for differences between $\delta(0)$ and $\delta(1)$, the mediated effect holding \texttt{AP} constant at 0 or 1, respectively.
+The ACME for students who are not in the AP intervention was estimated as between \Sexpr{round(med$d0.ci[1],3)} and \Sexpr{round(med$d0.ci[2],3)}, in effect-size units, with 95\% confidence.
+For students in the intervention, the confidence interval was \Sexpr{round(med$d0.ci[1],3)}---\Sexpr{round(med$d0.ci[2],3)}.
+
+The summary function also displays results for the average direct effect (ADE), estimated as  \Sexpr{round(med$z0.ci[1],3)}---\Sexpr{round(med$z0.ci[2],3)} or \Sexpr{round(med$z1.ci[1],3)}---\Sexpr{round(med$z1.ci[2],3)} in the control and intervention groups, respectively, and the total effect, estimated as \Sexpr{round(med$tau.ci[1],3)}---\Sexpr{round(med$tau.ci[2],3)}.
+Finally, perhaps the most interpretable measure of mediation is the ``proportion mediated,'' which is the proportion of the total effect explained by the mediator, or $\delta(0)/(\delta(0)+\zeta(1))$ or $\delta(1)/(\delta(0)+\zeta(1))$.
+For control subjects this proportion is between \Sexpr{round(med$n0.ci[1],3)} and \Sexpr{round(med$n0.ci[2],3)}, and for treated students the proportion is between \Sexpr{round(med$n1.ci[1],3)} and \Sexpr{round(med$n1.ci[1],3)}.
+
+It is also possible to plot 95\% confidence intervals for the ACME, ADE, and total effect:
+\begin{figure}[H]
+\centering
+<<plotMed,echo=TRUE,fig=TRUE,width=5>>=
+plot(med)
+@
+\caption{Estimates (points) and 95\% confidence intervals for the ACME, ADE, and total effect. The solid points and lines represent ACME and ADE effects for the treatment group, and the dotted lines and empty points represent estimates for the control group.}
+\end{figure}
+
+Options in the \texttt{mediate()} command allow robust (sandwich), cluster robust, and bootstrap standard errors.
+It also allows the user to specify values of a continuous treatment variable to contrast.
+
+\section{Identification Assumptions and Sensitivity to Hidden Bias}\label{sec:sensitivity}
+
+\begin{figure}
+\centering
+\begin{tikzpicture}[scale=1,transform shape]
+ % \draw[help lines](0,0) grid (10,3);
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (z) at (6,0) {$Z$};
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (y) at +(9,0){$Y$};
+	\node[draw,shape=circle, inner sep=0pt,minimum size=1cm] (m) at (7.5,2){$M$};
+	\draw[->,line width=2pt](z)--(m);
+	\draw[->,line width=2pt](m)--(y);
+	\draw[->,line width=2pt](z)--(y);
+% 	\node at (6.4,1.2) {(1)};
+% 	\node at (8.6,1.2) {(2)};
+% 	\node at (7.5,.3) {(3)};
+	\node (u1) at (6,1.5){$U_1$};
+	\node (u2) at (7.5,0.5){$U_2$};
+	\node (u3) at (7.5,-1){$U_3$};
+	\draw[->, dashed] (u1) to (z);
+	\draw[->, dashed] (u1) to (m);
+  \draw[->, dashed] (u2) to (m);
+  \draw[->, dashed] (u2) to (y);
+  \draw[->, dashed] (u3) to (z);
+  \draw[->,dashed] (u3) to (y);
+  \draw[->, dotted] (z) to (u2);
+
+
+
+\end{tikzpicture}
+\caption{A graph of three different types of confounding variables, which may violate sequential ignorability. $U_1$ confounds the relationship between $Z$ and $M$, $U_2$ confounds the relationship between $M$ and $Y$, and $U_3$ confounds the relationship between $Z$ and $Y$. The dotted line from $Z$ to $U_2$ indicates that the confounder $U_2$ may be post-treatment.}
+\label{fig:confounding}
+\end{figure}
+
+Causal mediation analysis requires stronger assumptions than traditional causal inference, one of which is untestable even in conventional randomized controlled trials.\footnote{See \citet{imaiDesign} for a design of a randomized trial that ensures that the assumptions are met.}
+In addition to assuming no interference between units, as discussed above in Section \ref{sec:def}, in mediation studies analysts must also assume that there is no unmeasured confounding.
+Specifically, mediation analysis requires sequential ignorability \citep{imai2010identification}:
+\begin{align}
+Y_i(z,m)&\independent Z_i|X_i \label{eq:ignore1}\\
+M_i(z) &\independent Z_i|X_i \label{eq:ignore2}\\
+Y(z',m) &\independent M_i(z)|Z_i,X_i \label{eq:ignore3}
+\end{align}
+The first two ignorability assumptions, (\ref{eq:ignore1}) and (\ref{eq:ignore2}) are familiar from conventional causal inference---in order to infer the effect of $Z$ on $M$ or $Y$, $Z$ must be independent of $M$ and $Y$'s potential outcomes, conditional on observed covariates $X$.
+Assumptions (\ref{eq:ignore1}) and (\ref{eq:ignore2}) are satisfied in randomized trials, where the researcher controls distribution of $Z$.
+
+The third part of the assumption, (\ref{eq:ignore3}) is necessary to infer the effect of $M$ on $Y$, by assuming that, conditional on realized treatment $Z=z$ and covariates, $M$ is independent of $Y$'s potential outcomes.
+Randomizing $Z$, as in conventional randomized trials, does not guarantee that (\ref{eq:ignore3}) is satisfied.
+Indeed, since the effect of $Z$ on $M$ is a crucial piece of mediation analysis, directly manipulating $M$ would be undesirable.
+
+Figure \ref{fig:confounding} gives an interpretation of sequential ignorability in terms of unmeasured confounders $U_1$, $U_2$, and $U_3$ which would violate it.
+If an unmeasured variable predicts both $Z$ and $M$, such as $U_1$, both $M$ and $Y$, such as $U_2$, or both $Z$ and $Y$, such as $U_3$, sequential ignorability does not hold.
+Importantly, $U_2$ may be pre- or post-treatment---in either case, it will violate sequential ignorability and bias the mediation analysis.
+The three omitted variables in Figure \ref{fig:confounding} map on to the three equations that comprise sequential ignorability: $U_1$ violates (\ref{eq:ignore1}), $U_2$ violates (\ref{eq:ignore3}) and $U_3$ violates (\ref{eq:ignore2}).
+As above, then, randomization of $Z$ implies that there are no variables such as $U_1$ and $U_3$ that could confound the analysis; however, a confounder such as $U_2$ is harder to control.
+The fact that $U_2$ may be post-treatment is especially troubling, since even if it were measured, adjusting the analysis for a post-treatment $U_2$ is non-trivial, and requires further untestable assumptions.
+
+The \texttt{mediation} package provides a function, \texttt{medsens()}, for researchers to assess the sensitivity of their mediation analyses to the assumption in (\ref{eq:ignore3}).
+The method applies when both $\medmod$ and $\outmod$ are fit with OLS (using \texttt{lm}) or binary-probit regression (using \texttt{glm}), two models which involve error terms.
+Then the idea behind the sensitivity analysis, described more fully in \citet{imai2010identification}, is that an unobserved pre-treatment confounder between $M$ and $Y$, such as $U_2$, would induce a correlation between the errors $\medmod$ and $\outmod$.
+In fact, knowing the correlation between errors, denoted $\rho$, would suffice to estimate the ACME and ADE without bias.
+The sensitivity analysis re-estimates the ACME and ADE for a vector of values for $\rho$; the set of ACME estimates corresponding to plausible values of $\rho$ captures the uncertainty in the estimated ACME due to violations of assumption (\ref{eq:ignore3}).
+The interval containing the 95\% confidence bounds for the same set of plausible $\rho$ values is a ``sensitivity interval'' \citep[cf.][]{small2007sensitivity}, which accounts for uncertainty both due to sampling or randomization error and due to violations of (\ref{eq:ignore3}).
+
+Choosing plausible values for $\rho$ is a difficult task, since it depends wholly on substantive theory and prior research---the data themselves are not informative.
+Moreover, $\rho$ is a difficult parameter to interpret.
+However, \citet{imai2010identification}, along with the output from \texttt{medsens()}, provides two alternative parametrizations that may be easier to interpret.
+The two alternatives both take the form of the product of two coefficients of determination ($R^2$) values.
+One, denoted as $R^{2*}_MR^{2*}_Y$, is the product of the amount of \emph{previously} unexplained variation in $M$ and $Y$ due to a missing confounder.
+The second, denoted as $\tilde{R}^{2}_M\tilde{R}^{2*}_Y$, is the product of the amount of \emph{total} variation in $Y$ and $M$ explained by a missing confounder.
+Converting between the $\rho$ formulation and the $R^{2*}_MR^{2*}_Y$ formulation is simple: $R^{2*}_MR^{2*}_Y$ is equal to $\rho^2$.
+
+With a fitted mediation model in hand, such as \texttt{med}, above, conducting such a sensitivity analysis in \texttt{mediation} is straightforward:
+<<sensitivity,echo=TRUE,results=verbatim>>=
+sensitivityAnalysis <- medsens(med)
+@
+
+The output from \texttt{medsens()} can be displayed via the \texttt{summary()} command, which returns the values of $\rho$, $R^{2*}_MR^{2*}_Y$, and $\tilde{R}^{2}_M\tilde{R}^{2*}_Y$ at which the ACMEs for the treatment and control group is approximately zero.
+Alternatively, users can directly access the sensitivity results to compute sensitivity intervals or other analysis summaries.
+For instance, the following code returns a sensitivity interval assuming $R^{2*}_MR^{2*}_Y$$=\rho^2<0.25$:
+<<sensInterval,echo=TRUE,results=verbatim>>=
+## ACME for the control group:
+with(sensitivityAnalysis,
+     print(c(min(lower.d0[rho^2<0.25]),max(upper.d0[rho^2<0.25]))))
+## ACME for the treatment group:
+with(sensitivityAnalysis,
+     print(c(min(lower.d1[rho^2<0.25]),max(upper.d1[rho^2<0.25]))))
+@
+
+It is also possible to plot the results of the sensitivity analysis:
+\begin{figure}[H]
+\centering
+<<plotSens,echo=TRUE,fig=TRUE,width=7>>=
+par(mfrow=c(1,2))
+plot(sensitivityAnalysis)
+@
+\caption{Sensitivity analysis for causal mediation.}
+\end{figure}
+The result is a plot of the estimate (solid line) and 95\% confidence intervals (shaded area) as a function of $\rho$, for $\delta(0)$ and $\delta(1)$.
+
+The sensitivity analysis of the toy AP data suggests that its estimates are rather sensitive to hidden bias; unless theoretical or background knowledge rules out mediator-exposure confounders of all but minimial importance, the interpretation of the mediation analysis must be conservative.
+
+The focus of \texttt{mediation}'s sensitivity analysis on mediator-outcome confounding, such as $U_2$, follows most of the causal mediation literature---though an appendix of \citet{vanderweele2010bias} provides a method for treatment-mediator confounding.
+This is presumably because treatment-mediator or treatment-outcome confounding is controllable via a randomized experiment.
+However, in education sciences observational studies predominate and a method for assessing sensitivity to confounders of all types would be useful.
+
+\section{Moderated Mediation}\label{sec:moderated}
+It is possible for direct and indirect effects to depend on a pre-treatment covariate $X$.
+For instance, in our AP example, the AP intervention may have a larger effect on college attendance for low-SES students than for high-SES students.
+Then the natural indirect effect $\delta$ would depend on $X$, as $\delta(z,X)$.
+This is referred to as ``moderated mediation.''
+The \texttt{mediation} package provides a method to estimate moderated mediation, via the \texttt{covariates} argument in the \texttt{mediation()} function.
+To demonstrate, we will first re-fit $\medmod$ to include an interaction between \texttt{AP} and \texttt{ses}.
+Then, we will estimate two ACMEs, at the first and third quantiles of the empirical SES distribution, to examine the dependence of $\delta$ on SES.
+
+\begin{figure}[H]
+<<moderated,echo=TRUE,results=verbatim, fig=TRUE,width=7>>=
+medModelModerated <- update(medModel,.~.+AP:ses)
+medLowSES <- mediate(model.m = medModelModerated,model.y = outModel,treat = 'AP',
+    mediator = 'college',data=APdata, covariates=list(ses=quantile(ses,.25)))
+medHighSES <-  mediate(model.m = medModelModerated,model.y = outModel,treat = 'AP',
+    mediator = 'college',data=APdata, covariates=list(ses=quantile(ses,.75)))
+par(mfrow=c(1,2))
+plot(medLowSES,main='Low SES')
+plot(medHighSES,main='High SES')
+@
+\caption{Estimating mediational effects at high and low SES: moderated mediation}
+\end{figure}
+
+
+\section{Discussion}\label{sec:discussion}
+The past decade of research has made mediation analysis rigorous, flexible, and conceptually sound.
+However, many of the newer mediation methods can be difficult to implement, especially when either $M$ or $Y$ is non-normal, or relationships are non-linear.
+Additionally, the strong untestable assumptions in mediation analysis make sensitivity analysis indispensable; this adds even further to the the difficulty of implementing a careful mediation study.
+All that being the case, the \texttt{mediation} package is an invaluable addition to the educational and behavioral statistics toolkit.
+The \texttt{mediate()} function is easy to implement, and its output is (relatively) easy to understand.
+It is extremely flexible in terms of the outcome and mediation models it takes as inputs, which allows researchers to model the data as they see fit, instead of having to contort their data analysis into one of a few forms.
+Further, the fact that it takes fitted models as inputs, instead of raw data and instructions, allows researchers to select the model that they feel best represents the data, using all available model fit criteria, before beginning the mediation analysis.
+The sensitivity function \texttt{medsens()} is similarly easy to use, and the plots it generates are both visually appealing and highly interpretable---at least as far as sensitivity analysis plots go.
+
+That said, the development of the \texttt{mediation} must be an ongoing project (and I believe it is).
+Quantitative education research relies heavily on path analysis and linear structural equation modeling using programs such as \emph{Mplus} \citep{mplus} or \texttt{R} packages such as \texttt{lavaan} or \texttt{sem} \citep{lavaan,sem} that do not take full advantage of the recent methodological advances in causal mediation analysis.
+One advantage of the SEM framework is that in can incorporate latent variables and measurement models into analyses, complications that, to the best of my knowledge, are not yet in the purview of potential-outcomes based mediation methodology.
+But the other advantage of SEM software is its ability to model highly complex mediational models, with several causally dependent mediators and moderators.
+There has been some recent work on identification and estimation for multiple mediators in the potential outcomes framework, such as \citet{imai2013identification} and \citet{vanderweele2013mediation}; if these methods were incorporated into the \texttt{mediation} package, it would be even more valuable to the education research community.
+
+Additionally, the \texttt{mediation} software can at times take a long time to run, and there are several place in the source code that can be modified to speed things up.
+For instance, some aspects of the \texttt{mediation} computation are embarrassingly parallel---modifications to the software that would allow for parallel computation would improve matters.
+
+Mediation analysis is one of the more exciting new developments in statistical causal inference. The \texttt{mediation} package, with its ease of use and flexibility, grants quantitative researchers access to the new methods to a wide range of quantitative researchers.
+
+\bibliographystyle{plainnat}
+\bibliography{mediation}
+\end{document}
