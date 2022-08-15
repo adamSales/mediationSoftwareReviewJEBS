@@ -388,4 +388,10 @@ Mediation analysis is one of the more exciting new developments in statistical c
 
 \bibliographystyle{plainnat}
 \bibliography{mediation}
+
+\section{Replication Info}
+<<sessionInfo,echo=TRUE,results=verbatim>>=
+sessionInfo()
+@
+
 \end{document}
